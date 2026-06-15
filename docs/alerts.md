@@ -26,6 +26,19 @@
   - disable failing tool
   - retry with fallback model
 
+## 4. Low quality score
+- Severity: P3
+- Trigger: `quality_score_avg < 0.6 for 10m`
+- Impact: answers are below acceptable quality threshold
+- First checks:
+  1. Filter traces by low `quality_score` in Langfuse
+  2. Check if retrieved docs are relevant (doc_count in metadata)
+  3. Inspect prompt construction in agent.py
+- Mitigation:
+  - improve RAG retrieval query
+  - expand knowledge base
+  - tune prompt template
+
 ## 3. Cost budget spike
 - Severity: P2
 - Trigger: `hourly_cost_usd > 2x_baseline for 15m`

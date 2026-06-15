@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import os
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
+from pathlib import Path
+
+load_dotenv(Path(__file__).parent.parent / ".env")
 from fastapi.responses import JSONResponse
 from structlog.contextvars import bind_contextvars
 
@@ -14,12 +18,19 @@ from .middleware import CorrelationIdMiddleware
 from .pii import hash_user_id, summarize_text
 from .schemas import ChatRequest, ChatResponse
 from .tracing import tracing_enabled
+from langfuse import get_client as langfuse_get_client
 
 configure_logging()
 log = get_logger()
 app = FastAPI(title="Day 13 Observability Lab")
 app.add_middleware(CorrelationIdMiddleware)
 agent = LabAgent()
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    if tracing_enabled():
+        langfuse_get_client().flush()
 
 
 @app.on_event("startup")
@@ -37,6 +48,13 @@ async def health() -> dict:
     return {"ok": True, "tracing_enabled": tracing_enabled(), "incidents": status()}
 
 
+@app.post("/flush")
+async def flush_traces() -> dict:
+    if tracing_enabled():
+        langfuse_get_client().flush()
+    return {"ok": True}
+
+
 @app.get("/metrics")
 async def metrics() -> dict:
     return snapshot()
@@ -44,9 +62,16 @@ async def metrics() -> dict:
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: Request, body: ChatRequest) -> ChatResponse:
-    # TODO: Enrich logs with request context (user_id_hash, session_id, feature, model, env)
-    # bind_contextvars(...)
-    
+    # Gắn thêm context vào túi structlog — mọi log.info/log.error bên dưới
+    # đều tự có các trường này mà không cần truyền thủ công
+    bind_contextvars(
+        user_id_hash=hash_user_id(body.user_id),  # hash để không lưu user_id thật vào log
+        session_id=body.session_id,
+        feature=body.feature,
+        model=agent.model,
+        env=os.getenv("APP_ENV", "dev"),
+    )
+
     log.info(
         "request_received",
         service="api",
